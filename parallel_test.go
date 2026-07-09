@@ -1,6 +1,7 @@
 package radsort
 
 import (
+	"cmp"
 	"fmt"
 	"slices"
 	"sync"
@@ -89,13 +90,56 @@ func TestParallelReuse(t *testing.T) {
 func TestParallelMatchesSerial(t *testing.T) {
 	r := newRNG()
 	const n = 3_000_000
-	for _, d := range []string{"uniform", "smallRange", "fewUnique", "sorted", "reverse"} {
+	dists := []string{"uniform", "smallRange", "fewUnique", "sorted", "reverse"}
+	for _, d := range dists {
 		x := genUint32(n, d, r)
 		want := slices.Clone(x)
 		Uint32s(want)
 		ParallelUint32s(x)
 		if !slices.Equal(x, want) {
-			t.Fatalf("dist=%s: parallel != serial", d)
+			t.Fatalf("uint32 dist=%s: parallel != serial", d)
+		}
+	}
+	for _, d := range dists {
+		x := genUint64Dist(n, d, r)
+		want := slices.Clone(x)
+		Uint64s(want)
+		ParallelUint64s(x)
+		if !slices.Equal(x, want) {
+			t.Fatalf("uint64 dist=%s: parallel != serial", d)
+		}
+	}
+}
+
+// TestParallelSortKeyCustom guards the fix that ParallelSorter.SortKey honours a
+// custom key even for the built-in element types (the monomorphised sub-sort
+// must not silently sort by raw value). The key inverts the order, so a raw-value
+// sub-sort would produce the wrong result.
+func TestParallelSortKeyCustom(t *testing.T) {
+	r := newRNG()
+	for _, n := range []int{1000, parallelMinLen + 100} { // serial-fallback and parallel paths
+		x := make([]uint32, n)
+		for i := range x {
+			x[i] = r.Uint32()
+		}
+		want := slices.Clone(x)
+		slices.SortStableFunc(want, func(a, b uint32) int { return cmp.Compare(b, a) }) // descending
+		var ps ParallelSorter[uint32]
+		ps.SortKey(x, 4, func(v uint32) uint64 { return uint64(^v) }) // ascending ^v == descending v
+		if !slices.Equal(x, want) {
+			t.Fatalf("uint32 custom key n=%d: not honoured", n)
+		}
+
+		y := make([]uint64, n)
+		for i := range y {
+			y[i] = r.Uint64()
+		}
+		wy := slices.Clone(y)
+		slices.SortStableFunc(wy, func(a, b uint64) int { return cmp.Compare(b, a) })
+		var ps64 ParallelSorter[uint64]
+		ps64.SortKey(y, 8, func(v uint64) uint64 { return ^v })
+		if !slices.Equal(y, wy) {
+			t.Fatalf("uint64 custom key n=%d: not honoured", n)
 		}
 	}
 }
@@ -119,10 +163,11 @@ func BenchmarkParallel(b *testing.B) {
 	}
 }
 
-// BenchmarkConcurrentScaling measures how aggregate throughput scales when P
-// independent sorts run concurrently — the memory-bandwidth ceiling that limits
-// any single parallel sort.
-func BenchmarkConcurrentScaling(b *testing.B) {
+// BenchmarkConcurrentSerialSorts measures how aggregate throughput scales when
+// P independent *serial* Uint32s calls run concurrently. It is a diagnostic for
+// the memory-bandwidth ceiling that limits any single parallel sort, not a
+// benchmark of the parallel sort itself (see BenchmarkParallel for that).
+func BenchmarkConcurrentSerialSorts(b *testing.B) {
 	r := newRNG()
 	for _, n := range []int{1_000_000, 16_000_000} {
 		for _, p := range []int{1, 2, 4, 8, 16} {

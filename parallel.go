@@ -133,17 +133,22 @@ func prefix(cnt *[radix]int) [radix]int {
 	return start
 }
 
-// subsort sorts x by its low `rounds` bytes, using the monomorphised path for
-// the built-in integer types and the generic path otherwise.
+// subsort sorts x by its low `rounds` bytes. A nil keyOf means natural order,
+// which takes the monomorphised path for the built-in integer types; a non-nil
+// keyOf must be honoured, so it always uses the generic path (the fast path
+// would sort by raw value and ignore the custom key).
 func subsort[E any](s *Sorter[E], x []E, rounds int, keyOf func(E) uint64) {
-	switch st := any(s).(type) {
-	case *Sorter[uint32]:
-		sortU32Rounds(st, any(x).([]uint32), rounds)
-	case *Sorter[uint64]:
-		sortU64Rounds(st, any(x).([]uint64), rounds)
-	default:
-		s.SortKey(x, rounds, keyOf)
+	if keyOf == nil {
+		switch st := any(s).(type) {
+		case *Sorter[uint32]:
+			sortU32Rounds(st, any(x).([]uint32), rounds)
+			return
+		case *Sorter[uint64]:
+			sortU64Rounds(st, any(x).([]uint64), rounds)
+			return
+		}
 	}
+	s.SortKey(x, rounds, keyOf)
 }
 
 func sortU32Rounds(s *Sorter[uint32], x []uint32, rounds int) {

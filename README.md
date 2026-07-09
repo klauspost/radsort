@@ -107,6 +107,13 @@ On a 16-core Zen 5 this gives ~2.4–3.2× over the serial sort for arrays of
 bound, so more threads mostly contend for memory channels. A `ParallelSorter`
 runs its own goroutines; don't share one across concurrent callers.
 
+The split is a single most-significant-byte partition, so it only balances work
+when the top byte is reasonably spread. Inputs whose keys share a top byte (e.g.
+small-range or pre-sorted data) collapse into one bucket and effectively run
+serially — no speedup, but no slowdown either (it degrades to a serial sort plus
+a cheap split pass). If your keys are known to be skewed in the top byte,
+parallelism will not help.
+
 ## Correctness
 
 - Structured tests over sizes that hit every block/scratch boundary (empty,
