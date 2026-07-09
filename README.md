@@ -82,6 +82,31 @@ for k, v := range radsort.Map(m) {
 Do not mutate the map while iterating. (Float NaN keys are pathological — they
 sort last and can't be looked up.)
 
+### Concurrent sorting
+
+`ParallelUint32s` / `ParallelUint64s` sort large slices using multiple
+goroutines. They split on the most significant byte into independent buckets and
+sort those concurrently, so they need an O(n) buffer (trading Radsort's O(√n)
+space for parallelism). Below ~1M elements, or on a single CPU, they fall back
+to the serial sort automatically.
+
+```go
+radsort.ParallelUint32s(x) // allocates working buffers per call
+
+// reuse buffers across calls (avoids re-allocating the O(n) split buffer):
+var ps radsort.ParallelSorter[uint32]
+for _, batch := range batches {
+    ps.Sort(batch)                              // uint32/uint64, fast
+}
+ps2 := &radsort.ParallelSorter[myType]{}
+ps2.SortKey(data, rounds, keyOf)                // any type, via a key function
+```
+
+On a 16-core Zen 5 this gives ~2.4–3.2× over the serial sort for arrays of
+16–64M elements, plateauing around 8 workers — radix sorting is memory-bandwidth
+bound, so more threads mostly contend for memory channels. A `ParallelSorter`
+runs its own goroutines; don't share one across concurrent callers.
+
 ## Correctness
 
 - Structured tests over sizes that hit every block/scratch boundary (empty,
@@ -167,6 +192,23 @@ loop wins on wall-clock — while Radsort still delivers its headline benefit:
 **~75× less memory** (`O(√n)`-with-fixed-`b` vs `O(n)`). The advantage is
 hardware-dependent; expect Radsort to look better on bandwidth-bound servers.
 
+### Concurrent sorting
+
+`[]uint32`, uniform random, up to 8 worker goroutines (`-benchmem`):
+
+|                     |       10M |       30M |
+|---------------------|----------:|----------:|
+| serial              |  943 MB/s |  832 MB/s |
+| parallel (fresh)    | 2457 MB/s | 2682 MB/s |
+| parallel (recycled) | 2637 MB/s | 2890 MB/s |
+| speedup (recycled)  |      2.8× |      3.5× |
+
+`recycled` reuses a `ParallelSorter` and so avoids re-allocating the O(n) split
+buffer (a fresh 30M sort otherwise allocates ~120 MiB per call); it is both
+faster and allocation-free after warm-up. Speedup is capped by memory bandwidth:
+running independent sorts on more goroutines, aggregate throughput saturates
+around 8 threads (~4.2 GB/s here), so a single parallel sort tops out around 3×.
+
 ## Memory / allocations
 
 `radsort.Uint32s` reports `5 allocs/op`, all from one-time setup per call:
@@ -195,9 +237,12 @@ amortized:
 
 ## Not implemented
 
-The paper's optional optimizations: bit-manipulation end-of-block checking
-(§4.2, "bitmanip", 5–50 % faster), multi-threading (§4.3), and software
-write-combining. This is the single-threaded `permuted` variant.
+The scalar core is the paper's single-threaded `permuted` variant. Left out:
+bit-manipulation end-of-block checking (§4.2, "bitmanip", 5–50 % faster) and
+software write-combining. The concurrent sorts use a most-significant-byte split
+into independent buckets (the parallelisation the paper suggests in §5.2) rather
+than its §4.3 block-chunk scheme; the split path uses an O(n) buffer, so it does
+not preserve the O(√n) space bound.
 
 ## License
 
