@@ -79,6 +79,13 @@ func genUint64Dist(n int, dist string, r *rand.Rand) []uint64 {
 		for i := range x {
 			x[i] = r.Uint64() % 1000
 		}
+	case "nearlySorted":
+		for i := range x {
+			x[i] = uint64(i)
+		}
+		for k := 0; k < n/100; k++ { // perturb 1% of positions
+			x[r.IntN(n)] = r.Uint64()
+		}
 	default:
 		panic(dist)
 	}

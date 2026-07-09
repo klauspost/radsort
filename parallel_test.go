@@ -90,7 +90,7 @@ func TestParallelReuse(t *testing.T) {
 func TestParallelMatchesSerial(t *testing.T) {
 	r := newRNG()
 	const n = 3_000_000
-	dists := []string{"uniform", "smallRange", "fewUnique", "sorted", "reverse"}
+	dists := []string{"uniform", "smallRange", "fewUnique", "sorted", "reverse", "nearlySorted"}
 	for _, d := range dists {
 		x := genUint32(n, d, r)
 		want := slices.Clone(x)
