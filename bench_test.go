@@ -54,6 +54,44 @@ func genUint64(n int, r *rand.Rand) []uint64 {
 	return x
 }
 
+// genUint64Dist is genUint32's uint64 counterpart, used to cross-check the
+// uint64 parallel path across the same distributions.
+func genUint64Dist(n int, dist string, r *rand.Rand) []uint64 {
+	x := make([]uint64, n)
+	switch dist {
+	case "uniform":
+		for i := range x {
+			x[i] = r.Uint64()
+		}
+	case "sorted":
+		for i := range x {
+			x[i] = uint64(i)
+		}
+	case "reverse":
+		for i := range x {
+			x[i] = uint64(n - i)
+		}
+	case "fewUnique":
+		for i := range x {
+			x[i] = r.Uint64() % 16
+		}
+	case "smallRange":
+		for i := range x {
+			x[i] = r.Uint64() % 1000
+		}
+	case "nearlySorted":
+		for i := range x {
+			x[i] = uint64(i)
+		}
+		for k := 0; k < n/100; k++ { // perturb 1% of positions
+			x[r.IntN(n)] = r.Uint64()
+		}
+	default:
+		panic(dist)
+	}
+	return x
+}
+
 type kv struct {
 	key uint32
 	val uint32
