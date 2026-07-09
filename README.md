@@ -29,6 +29,8 @@ final *compact* step shuffles the blocks back into the caller's slice.
 
 ## Usage
 
+[![Go Reference](https://pkg.go.dev/badge/klauspost/radsort.svg)](https://pkg.go.dev/github.com/klauspost/radsort)
+
 ```go
 import "github.com/klauspost/radsort"
 
