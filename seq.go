@@ -82,7 +82,9 @@ func seqU32(v []uint32, yield func(uint32) bool) {
 	}
 	var s Sorter[uint32]
 	s.prepare(v)
-	sortRoundsU32(&s)
+	for r := range 4 {
+		sortStepU32(&s, uint(r)*rshift)
+	}
 	s.iterate(yield)
 }
 
@@ -97,7 +99,9 @@ func seqU64(v []uint64, yield func(uint64) bool) {
 	}
 	var s Sorter[uint64]
 	s.prepare(v)
-	sortRoundsU64(&s)
+	for r := range 8 {
+		sortStepU64(&s, uint(r)*rshift)
+	}
 	s.iterate(yield)
 }
 

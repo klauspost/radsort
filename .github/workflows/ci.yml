@@ -27,8 +27,6 @@ jobs:
           fi
       - name: go vet
         run: go vet ./...
-      - name: build (appengine safe path)
-        run: go build -tags appengine ./...
       - name: go mod tidy
         run: |
           go mod tidy
@@ -48,5 +46,3 @@ jobs:
           go-version: ${{ matrix.go }}
       - name: test (-race)
         run: go test -race -shuffle=on ./...
-      - name: test (-race, -tags nounsafe)
-        run: go test -race -shuffle=on -tags nounsafe ./...

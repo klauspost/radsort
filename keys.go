@@ -22,7 +22,9 @@ func sortU32(s *Sorter[uint32], x []uint32) {
 		return
 	}
 	s.prepare(x)
-	sortRoundsU32(s)
+	for r := range 4 {
+		sortStepU32(s, uint(r)*rshift)
+	}
 	compact(s)
 }
 
@@ -31,7 +33,9 @@ func sortU64(s *Sorter[uint64], x []uint64) {
 		return
 	}
 	s.prepare(x)
-	sortRoundsU64(s)
+	for r := range 8 {
+		sortStepU64(s, uint(r)*rshift)
+	}
 	compact(s)
 }
 

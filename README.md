@@ -103,14 +103,6 @@ the slice itself sorted. `Uint64Seq`, `Int32Seq`, `Int64Seq`, `Float32Seq`, and
 type by a key function (as `SortKey` is to `Uint32s`). (`Map` above uses the same
 mechanism internally.)
 
-### Build tags
-
-The `uint32`/`uint64` sorts use a little `unsafe` — a pointer-cursor inner loop
-that drops a bounds check — for inputs above ~256 K elements, where it runs a few
-percent faster; smaller inputs use the safe path regardless. Build with
-`-tags nounsafe` (or `appengine`) to compile only the safe path; results are
-identical.
-
 ### Concurrent sorting
 
 `ParallelUint32s` / `ParallelUint64s` sort large slices using multiple
@@ -274,20 +266,20 @@ amortized:
 ## Not implemented
 
 The core follows the paper's single-threaded `permuted` variant. Of the paper's
-optional optimizations, two are implemented and two are not.
+optional optimizations, only §4.1 is implemented.
 
 Implemented: **avoiding finalisation** (§4.1) — see `Uint32Seq`/`SortKeySeq`,
-which `Map` also uses; and the portable half of **§4.2's "bitmanip"** end-of-block check — each
-bucket is a `{cur, end}` pointer pair instead of a slice + index, dropping a
-bounds check and shrinking the bucket table (~6–10 % faster on large
-`uint32`/`uint64` sorts here, gated behind the build tags above).
+which `Map` also uses.
 
 Not implemented:
 
-- **The full §4.2 form** — a *single* cursor tested for block-alignment by
-  bitmask, which needs block-aligned storage (over-aligned scratch and handling
-  the input's unaligned head). It would trim the bucket table further for a few
-  percent more; the alignment machinery did not look worth it on this hardware.
+- **§4.2 "bitmanip" end-of-block checking.** Tracking each output bucket by a
+  raw cursor (dropping the per-write bounds check) is ~8 % faster here, but the
+  fast form detects a full block via a one-past-the-end pointer, which the race
+  detector's `checkptr` rejects. A `checkptr`-safe reformulation ran slower than
+  the plain safe loop on this hardware, so it was dropped. The full form — a
+  *single* cursor tested for block alignment by bitmask — additionally needs
+  block-aligned storage and did not look worth the complexity.
 - **The §4.3 block-chunk parallel scheme.** The concurrent sorts instead use the
   most-significant-byte split suggested at the end of §4.3, which needs an O(n)
   buffer and so does not preserve the O(√n) space bound that §4.3's scheme keeps.
