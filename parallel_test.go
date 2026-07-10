@@ -311,11 +311,11 @@ func TestParallelForceStable(t *testing.T) {
 			for i := range px {
 				px[i] = pair{key: r.Uint32() % 200, seq: i} // heavy collisions
 			}
+			want := slices.Clone(px)
+			slices.SortStableFunc(want, func(a, b pair) int { return cmp.Compare(a.key, b.key) })
 			forceParallelKey(&ps, px, w, 4, byKey)
-			for i := 1; i < len(px); i++ {
-				if px[i-1].key > px[i].key || (px[i-1].key == px[i].key && px[i-1].seq > px[i].seq) {
-					t.Fatalf("w=%d n=%d: unstable or unsorted at %d", w, n, i)
-				}
+			if !slices.Equal(px, want) {
+				t.Fatalf("w=%d n=%d: parallel result != stable sort", w, n)
 			}
 		}
 	}

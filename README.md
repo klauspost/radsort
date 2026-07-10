@@ -112,7 +112,7 @@ goroutines while keeping Radsort's O(√n) space. Each round splits the *blocks*
 into per-worker chunks of roughly equal size — each with its own scratch head
 start — sorts the chunks concurrently, then merges them (the paper's Section
 4.3). Working memory is a fixed ~8 MiB (uint32, 8 workers) plus O(n/b)
-bookkeeping, independent of `n`. Below ~256K elements, or on a single CPU, they
+bookkeeping, independent of `n`. Below ~128K elements, or on a single CPU, they
 fall back to the serial sort automatically.
 
 ```go

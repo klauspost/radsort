@@ -1,6 +1,7 @@
 package radsort
 
 import (
+	"cmp"
 	"encoding/binary"
 	"slices"
 	"testing"
@@ -95,15 +96,12 @@ func FuzzParallelStable(f *testing.F) {
 			}
 			x[i] = pair{key: k, seq: i}
 		}
+		want := slices.Clone(x)
+		slices.SortStableFunc(want, func(p, q pair) int { return cmp.Compare(p.key, q.key) })
 		var ps ParallelSorter[pair]
 		forceParallelKey(&ps, x, 3, 4, func(p pair) uint64 { return uint64(p.key) })
-		for i := 1; i < len(x); i++ {
-			if x[i-1].key > x[i].key {
-				t.Fatalf("n=%d: keys out of order at %d", len(x), i)
-			}
-			if x[i-1].key == x[i].key && x[i-1].seq > x[i].seq {
-				t.Fatalf("n=%d: unstable at %d", len(x), i)
-			}
+		if !slices.Equal(x, want) {
+			t.Fatalf("n=%d: parallel result != stable sort", len(x))
 		}
 	})
 }
