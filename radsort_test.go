@@ -84,6 +84,38 @@ func TestInt32s(t *testing.T) {
 	}
 }
 
+func TestUints(t *testing.T) {
+	r := newRNG()
+	for _, n := range testSizes {
+		x := make([]uint, n)
+		for i := range x {
+			x[i] = uint(r.Uint64())
+		}
+		want := slices.Clone(x)
+		slices.Sort(want)
+		Uints(x)
+		if !slices.Equal(x, want) {
+			t.Fatalf("n=%d: not sorted", n)
+		}
+	}
+}
+
+func TestInts(t *testing.T) {
+	r := newRNG()
+	for _, n := range testSizes {
+		x := make([]int, n)
+		for i := range x {
+			x[i] = int(r.Uint64())
+		}
+		want := slices.Clone(x)
+		slices.Sort(want)
+		Ints(x)
+		if !slices.Equal(x, want) {
+			t.Fatalf("n=%d: not sorted", n)
+		}
+	}
+}
+
 func TestFloat64s(t *testing.T) {
 	r := newRNG()
 	for _, n := range testSizes {

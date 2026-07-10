@@ -57,6 +57,16 @@ func Float64Seq(v []float64) iter.Seq[float64] {
 	return func(yield func(float64) bool) { seqKey(v, 8, float64Key, yield) }
 }
 
+// UintSeq is Uint32Seq for []uint (word-sized).
+func UintSeq(v []uint) iter.Seq[uint] {
+	return func(yield func(uint) bool) { seqKey(v, wordRounds, uintKey, yield) }
+}
+
+// IntSeq is Uint32Seq for []int (word-sized).
+func IntSeq(v []int) iter.Seq[int] {
+	return func(yield func(int) bool) { seqKey(v, wordRounds, intKey, yield) }
+}
+
 // SortKeySeq returns an iterator over data's elements in ascending order of the
 // unsigned key returned by keyOf, considering the low rounds key bytes
 // (least-significant first). It is the generic counterpart to Uint32Seq, as

@@ -2,10 +2,10 @@ package radsort
 
 import "iter"
 
-// MapKey is the set of map-key types Map can order. These are exactly the
-// types with a dedicated (monomorphised) sort helper.
+// MapKey is the set of map-key types Map can order — the types with a dedicated
+// typed sort entry point (Uint32s, Ints, Float64s, ...).
 type MapKey interface {
-	uint32 | uint64 | int32 | int64 | float32 | float64
+	uint | int | uint32 | uint64 | int32 | int64 | float32 | float64
 }
 
 // Map returns an iterator over the key/value pairs of m in ascending key order,
@@ -32,6 +32,10 @@ func Map[K MapKey, V any](m map[K]V) iter.Seq2[K, V] {
 // so neither step boxes per element.
 func sortedKeys[K MapKey](keys []K, yield func(K) bool) {
 	switch s := any(keys).(type) {
+	case []uint:
+		seqKey(s, wordRounds, uintKey, any(yield).(func(uint) bool))
+	case []int:
+		seqKey(s, wordRounds, intKey, any(yield).(func(int) bool))
 	case []uint32:
 		seqU32(s, any(yield).(func(uint32) bool))
 	case []uint64:

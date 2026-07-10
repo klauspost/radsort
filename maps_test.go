@@ -37,6 +37,16 @@ func TestMap(t *testing.T) {
 		t.Fatalf("int64 keys not sorted: %v", ik)
 	}
 
+	// word-sized signed keys (negatives via the word-width sign flip).
+	mw := map[int]string{-5: "a", 3: "b", -100: "c", 0: "d", 42: "e", -1: "f"}
+	var wk []int
+	for k := range Map(mw) {
+		wk = append(wk, k)
+	}
+	if !slices.IsSorted(wk) {
+		t.Fatalf("int keys not sorted: %v", wk)
+	}
+
 	// float keys, including negatives.
 	mf := map[float64]int{}
 	for i := range 500 {

@@ -38,6 +38,8 @@ radsort.Uint32s(keys)   // []uint32, 4 rounds
 radsort.Uint64s(keys)   // []uint64, 8 rounds
 radsort.Int32s(keys)    // []int32
 radsort.Int64s(keys)    // []int64
+radsort.Uints(keys)     // []uint  (word-sized: 32 or 64-bit)
+radsort.Ints(keys)      // []int
 radsort.Float32s(keys)  // []float32  (NaNs sort last)
 radsort.Float64s(keys)  // []float64
 
@@ -71,7 +73,7 @@ not safe for concurrent use.
 ### Iterating a map in key order
 
 `Map` returns an `iter.Seq2[K, V]` over a map's entries in ascending key order,
-for any key of a supported type (`uint32/uint64/int32/int64/float32/float64`).
+for any key of a supported type (`uint/int/uint32/uint64/int32/int64/float32/float64`).
 It sorts the keys with the monomorphised path and looks up values during
 iteration:
 
@@ -98,23 +100,25 @@ for v := range radsort.Uint32Seq(keys) {
 
 It sorts using `keys` as scratch and never writes the result back, so `keys` is
 left in an unspecified order once iteration starts — use `Uint32s` if you need
-the slice itself sorted. `Uint64Seq`, `Int32Seq`, `Int64Seq`, `Float32Seq`, and
-`Float64Seq` cover the other element types, and `SortKeySeq` sorts any element
-type by a key function (as `SortKey` is to `Uint32s`). (`Map` above uses the same
-mechanism internally.)
+the slice itself sorted. `Uint64Seq`, `Int32Seq`, `Int64Seq`, `Float32Seq`,
+`Float64Seq`, `UintSeq`, and `IntSeq` cover the other element types, and
+`SortKeySeq` sorts any element type by a key function (as `SortKey` is to
+`Uint32s`). (`Map` above uses the same mechanism internally.)
 
 ### Concurrent sorting
 
 `ParallelUint32s` / `ParallelUint64s` sort large slices using multiple
-goroutines. They split on the most significant byte into independent buckets and
-sort those concurrently, so they need an O(n) buffer (trading Radsort's O(√n)
-space for parallelism). Below ~1M elements, or on a single CPU, they fall back
-to the serial sort automatically.
+goroutines while keeping Radsort's O(√n) space. Each round splits the *blocks*
+into per-worker chunks of roughly equal size — each with its own scratch head
+start — sorts the chunks concurrently, then merges them (the paper's Section
+4.3). Working memory is a fixed ~8 MiB (uint32, 8 workers) plus O(n/b)
+bookkeeping, independent of `n`. Below ~256K elements, or on a single CPU, they
+fall back to the serial sort automatically.
 
 ```go
 radsort.ParallelUint32s(x) // allocates working buffers per call
 
-// reuse buffers across calls (avoids re-allocating the O(n) split buffer):
+// reuse buffers across calls (the ~8 MiB scratch is reused, not re-allocated):
 var ps radsort.ParallelSorter[uint32]
 for _, batch := range batches {
     ps.Sort(batch)                              // uint32/uint64, fast
@@ -123,17 +127,12 @@ ps2 := &radsort.ParallelSorter[myType]{}
 ps2.SortKey(data, rounds, keyOf)                // any type, via a key function
 ```
 
-On a 16-core Zen 5 this gives ~2.4–3.2× over the serial sort for arrays of
-16–64M elements, plateauing around 8 workers — radix sorting is memory-bandwidth
-bound, so more threads mostly contend for memory channels. A `ParallelSorter`
+On a 16-core Zen 5 this gives ~2.5–3× over the serial sort for arrays of 16–64M
+elements, plateauing around 8 workers — radix sorting is memory-bandwidth bound,
+so more threads mostly contend for memory channels. Chunks are balanced by
+element count rather than key distribution, so the speedup is robust to skew:
+pre-sorted or narrow-range inputs parallelise just as well. A `ParallelSorter`
 runs its own goroutines; don't share one across concurrent callers.
-
-The split is a single most-significant-byte partition, so it only balances work
-when the top byte is reasonably spread. Inputs whose keys share a top byte (e.g.
-small-range or pre-sorted data) collapse into one bucket and effectively run
-serially — no speedup, but no slowdown either (it degrades to a serial sort plus
-a cheap split pass). If your keys are known to be skewed in the top byte,
-parallelism will not help.
 
 ## Correctness
 
@@ -141,9 +140,10 @@ parallelism will not help.
   sub-block, exact block multiples, spanning many blocks).
 - An exhaustive sweep of **every** `n` from 0 to `4·b + σ`.
 - Stability and multiset-preservation checks.
-- Native fuzzing: `FuzzUints` (one byte corpus read as uint64s and truncated to
-  uint32s, driving both integer paths) and `FuzzStable` (generic path +
-  stability), each cross-checked against `slices.Sort`.
+- Native fuzzing: `FuzzUints` (both integer paths) and `FuzzStable` (generic path
+  + stability), plus `FuzzParallel` and `FuzzParallelStable` driving the Section
+  4.3 parallel core forced at all sizes and worker counts — each cross-checked
+  against `slices.Sort`.
 
 ```
 go test ./...
@@ -222,20 +222,21 @@ hardware-dependent; expect Radsort to look better on bandwidth-bound servers.
 
 ### Concurrent sorting
 
-`[]uint32`, uniform random, up to 8 worker goroutines (`-benchmem`):
+`[]uint32`, uniform random, up to 8 worker goroutines (`-benchmem`). Working
+memory stays a fixed few MiB, flat in `n`:
 
-|                     |       10M |       30M |
-|---------------------|----------:|----------:|
-| serial              |  943 MB/s |  832 MB/s |
-| parallel (fresh)    | 2457 MB/s | 2682 MB/s |
-| parallel (recycled) | 2637 MB/s | 2890 MB/s |
-| speedup (recycled)  |      2.8× |      3.5× |
+|                     |        1M |       10M |       30M |
+|---------------------|----------:|----------:|----------:|
+| serial              | 1110 MB/s |  800 MB/s |  810 MB/s |
+| parallel            | 2150 MB/s | 3200 MB/s | 3020 MB/s |
+| serial memory       |    1.1 MB |    1.2 MB |    1.6 MB |
+| parallel memory     |    8.5 MB |    8.7 MB |    9.1 MB |
 
-`recycled` reuses a `ParallelSorter` and so avoids re-allocating the O(n) split
-buffer (a fresh 30M sort otherwise allocates ~120 MiB per call); it is both
-faster and allocation-free after warm-up. Speedup is capped by memory bandwidth:
-running independent sorts on more goroutines, aggregate throughput saturates
-around 8 threads (~4.2 GB/s here), so a single parallel sort tops out around 3×.
+The Section 4.3 block-chunk scheme sorts in place with per-worker scratch, so its
+working set is fixed (~8 MiB scratch + O(n/b) bookkeeping) and flat in `n` — about
+8× the serial sort's, from the eight per-worker head starts. Throughput is capped
+by memory bandwidth: aggregate throughput saturates around 8 threads (~4.2 GB/s
+here), so a single parallel sort tops out around 3×.
 
 ## Memory / allocations
 
@@ -265,11 +266,11 @@ amortized:
 
 ## Not implemented
 
-The core follows the paper's single-threaded `permuted` variant. Of the paper's
-optional optimizations, only §4.1 is implemented.
+The core follows the paper's single-threaded `permuted` variant.
 
 Implemented: **avoiding finalisation** (§4.1) — see `Uint32Seq`/`SortKeySeq`,
-which `Map` also uses.
+which `Map` also uses; and the **§4.3 block-chunk parallel scheme** — see
+`ParallelUint32s` and the concurrent-sorting section above.
 
 Not implemented:
 
@@ -280,9 +281,6 @@ Not implemented:
   the plain safe loop on this hardware, so it was dropped. The full form — a
   *single* cursor tested for block alignment by bitmask — additionally needs
   block-aligned storage and did not look worth the complexity.
-- **The §4.3 block-chunk parallel scheme.** The concurrent sorts instead use the
-  most-significant-byte split suggested at the end of §4.3, which needs an O(n)
-  buffer and so does not preserve the O(√n) space bound that §4.3's scheme keeps.
 
 Software write-combining is *not* a missing Radsort feature: the paper's `swc` is
 a separate baseline (a conventional out-of-place radix sort with streaming
