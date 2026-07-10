@@ -4,7 +4,6 @@ import (
 	"math"
 	"math/rand/v2"
 	"slices"
-	"sort"
 	"testing"
 )
 
@@ -264,7 +263,7 @@ func TestPreservesMultiset(t *testing.T) {
 			x[i] = r.Uint64()
 		}
 		want := slices.Clone(x)
-		sort.Slice(want, func(i, j int) bool { return want[i] < want[j] })
+		slices.Sort(want)
 		Uint64s(x)
 		if !slices.Equal(x, want) {
 			t.Fatalf("n=%d: multiset changed", n)
@@ -298,4 +297,41 @@ func TestLargeDispatch(t *testing.T) {
 			t.Fatalf("Uint64s n=%d: not sorted", n)
 		}
 	}
+}
+
+func assertNaNSuffix[F ~float32 | ~float64](t *testing.T, name string, x []F) {
+	t.Helper()
+	seen := false
+	for i, v := range x {
+		if v != v { // NaN
+			seen = true
+			continue
+		}
+		if seen {
+			t.Fatalf("%s: non-NaN at %d follows a NaN", name, i)
+		}
+	}
+	if len(x) == 0 || x[len(x)-1] == x[len(x)-1] {
+		t.Fatalf("%s: last element is not NaN", name)
+	}
+}
+
+// TestFloatNaNsLast checks that every NaN — including negative-sign NaN bit
+// patterns, not just math.NaN() — sorts after all finite values and infinities,
+// for both float widths and the Seq path (all share the canonicalising key
+// mapping). A negative NaN previously mapped to a tiny key and sorted first.
+func TestFloatNaNsLast(t *testing.T) {
+	posNaN64 := math.Float64frombits(0x7ff8000000000001)
+	negNaN64 := math.Float64frombits(0xfff8000000000001) // sign bit set
+	x := []float64{3, negNaN64, math.Inf(1), -2, posNaN64, 0, math.Inf(-1), negNaN64}
+	Float64s(x)
+	assertNaNSuffix(t, "Float64s", x)
+	assertNaNSuffix(t, "Float64Seq",
+		slices.Collect(Float64Seq([]float64{1, negNaN64, math.Inf(1), posNaN64})))
+
+	posNaN32 := math.Float32frombits(0x7fc00001)
+	negNaN32 := math.Float32frombits(0xffc00001) // sign bit set
+	y := []float32{3, negNaN32, float32(math.Inf(1)), -2, posNaN32, 0, float32(math.Inf(-1)), negNaN32}
+	Float32s(y)
+	assertNaNSuffix(t, "Float32s", y)
 }

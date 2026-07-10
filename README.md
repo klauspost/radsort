@@ -276,8 +276,8 @@ amortized:
 The core follows the paper's single-threaded `permuted` variant. Of the paper's
 optional optimizations, two are implemented and two are not.
 
-Implemented: **avoiding finalisation** (§4.1) — see `xxxSeq`, which `Map` also
-uses; and the portable half of **§4.2's "bitmanip"** end-of-block check — each
+Implemented: **avoiding finalisation** (§4.1) — see `Uint32Seq`/`SortKeySeq`,
+which `Map` also uses; and the portable half of **§4.2's "bitmanip"** end-of-block check — each
 bucket is a `{cur, end}` pointer pair instead of a slice + index, dropping a
 bounds check and shrinking the bucket table (~6–10 % faster on large
 `uint32`/`uint64` sorts here, gated behind the build tags above).

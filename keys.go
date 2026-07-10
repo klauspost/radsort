@@ -53,10 +53,16 @@ func int64Key(v int64) uint64 { return uint64(v) ^ 1<<63 }
 
 func float32Key(v float32) uint64 {
 	b := math.Float32bits(v)
+	if v != v { // NaN: canonicalize to a positive quiet NaN so every NaN sorts last
+		b = 0x7fc00000
+	}
 	return uint64(b ^ (uint32(int32(b)>>31) | 1<<31))
 }
 
 func float64Key(v float64) uint64 {
 	b := math.Float64bits(v)
+	if v != v { // NaN: canonicalize to a positive quiet NaN so every NaN sorts last
+		b = 0x7ff8000000000000
+	}
 	return b ^ (uint64(int64(b)>>63) | 1<<63)
 }
