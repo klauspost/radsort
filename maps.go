@@ -21,34 +21,30 @@ func Map[K MapKey, V any](m map[K]V) iter.Seq2[K, V] {
 	for k := range m {
 		keys = append(keys, k)
 	}
-	sortKeys(keys)
 	return func(yield func(K, V) bool) {
-		for _, k := range keys {
-			if !yield(k, m[k]) {
-				return
-			}
-		}
+		sortedKeys(keys, func(k K) bool { return yield(k, m[k]) })
 	}
 }
 
-// sortKeys sorts keys in place, dispatching to the monomorphised helper for the
-// concrete element type. The assertion is on the slice header, so there is no
-// per-element boxing.
-func sortKeys[K MapKey](keys []K) {
+// sortedKeys sorts keys with radsort and calls yield for each key in ascending
+// order, using Section 4.1 iteration to skip the compaction pass. Dispatch is on
+// the slice header and the concrete yield is recovered once (not per element),
+// so neither step boxes per element.
+func sortedKeys[K MapKey](keys []K, yield func(K) bool) {
 	switch s := any(keys).(type) {
 	case []uint32:
-		Uint32s(s)
+		seqU32(s, any(yield).(func(uint32) bool))
 	case []uint64:
-		Uint64s(s)
+		seqU64(s, any(yield).(func(uint64) bool))
 	case []int32:
-		Int32s(s)
+		seqKey(s, 4, int32Key, any(yield).(func(int32) bool))
 	case []int64:
-		Int64s(s)
+		seqKey(s, 8, int64Key, any(yield).(func(int64) bool))
 	case []float32:
-		Float32s(s)
+		seqKey(s, 4, float32Key, any(yield).(func(float32) bool))
 	case []float64:
-		Float64s(s)
+		seqKey(s, 8, float64Key, any(yield).(func(float64) bool))
 	default:
-		panic("unexpect map key type")
+		panic("radsort: unexpected map key type")
 	}
 }

@@ -271,3 +271,31 @@ func TestPreservesMultiset(t *testing.T) {
 		}
 	}
 }
+
+// TestLargeDispatch sorts inputs above the unsafe/safe size threshold so the
+// size-dispatched sort phase is exercised end-to-end through the public entry
+// points (the unsafe pointer-cursor phase in the default build, the safe phase
+// under -tags nounsafe/appengine).
+func TestLargeDispatch(t *testing.T) {
+	r := newRNG()
+	for _, n := range []int{1 << 18, 1<<18 + 12345, 400_000} {
+		x := make([]uint32, n)
+		y := make([]uint64, n)
+		for i := range x {
+			x[i] = r.Uint32()
+			y[i] = r.Uint64()
+		}
+		wx := slices.Clone(x)
+		slices.Sort(wx)
+		wy := slices.Clone(y)
+		slices.Sort(wy)
+		Uint32s(x)
+		Uint64s(y)
+		if !slices.Equal(x, wx) {
+			t.Fatalf("Uint32s n=%d: not sorted", n)
+		}
+		if !slices.Equal(y, wy) {
+			t.Fatalf("Uint64s n=%d: not sorted", n)
+		}
+	}
+}

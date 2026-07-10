@@ -84,6 +84,33 @@ for k, v := range radsort.Map(m) {
 Do not mutate the map while iterating. (Float NaN keys are pathological — they
 sort last and can't be looked up.)
 
+### Iterating values in order
+
+`Uint32Seq` returns an `iter.Seq[uint32]` over a slice's values in ascending
+order, yielding straight from radsort's internal block layout and skipping the
+final compaction pass (the paper calls this *avoiding finalisation*, §4.1):
+
+```go
+for v := range radsort.Uint32Seq(keys) {
+    ...
+}
+```
+
+It sorts using `keys` as scratch and never writes the result back, so `keys` is
+left in an unspecified order once iteration starts — use `Uint32s` if you need
+the slice itself sorted. `Uint64Seq`, `Int32Seq`, `Int64Seq`, `Float32Seq`, and
+`Float64Seq` cover the other element types, and `SortKeySeq` sorts any element
+type by a key function (as `SortKey` is to `Uint32s`). (`Map` above uses the same
+mechanism internally.)
+
+### Build tags
+
+The `uint32`/`uint64` sorts use a little `unsafe` — a pointer-cursor inner loop
+that drops a bounds check — for inputs above ~256 K elements, where it runs a few
+percent faster; smaller inputs use the safe path regardless. Build with
+`-tags nounsafe` (or `appengine`) to compile only the safe path; results are
+identical.
+
 ### Concurrent sorting
 
 `ParallelUint32s` / `ParallelUint64s` sort large slices using multiple
@@ -144,16 +171,16 @@ DDR5), Go 1.26, `windows/amd64`. Reproduce with `go test -bench . -benchmem`.
 
 |          n | radsort | stdlib | speedup |
 |-----------:|--------:|-------:|--------:|
-|      1 000 |      51 |    815 |   0.06× |
-|     10 000 |     311 |    118 |    2.6× |
-|    100 000 |     980 |     88 |     11× |
-|  1 000 000 |    1203 |     74 |     16× |
-| 10 000 000 |     962 |     65 |     15× |
-| 30 000 000 |     868 |     60 | **14×** |
+|      1 000 |      48 |    758 |   0.06× |
+|     10 000 |     269 |    116 |    2.3× |
+|    100 000 |     969 |     89 |     11× |
+|  1 000 000 |    1255 |     74 |     17× |
+| 10 000 000 |     994 |     65 |     15× |
+| 30 000 000 |     875 |     61 | **14×** |
 
-`[]uint64` (8 rounds): radsort 708–1116 MB/s, stdlib 122–1636; **5.8×** at 30M.
+`[]uint64` (8 rounds): radsort 720–1186 MB/s, stdlib 121–1537; **6.0×** at 30M.
 Key/value pairs `struct{key,val uint32}` (radsort's design target, via `SortKey`):
-756–913 MB/s vs stdlib's 76–421; **10×** at 30M.
+790–940 MB/s vs stdlib's 78–545; **10×** at 30M.
 
 Below ~10 000 elements (well inside cache) the fixed ~1–2 MiB scratch allocation
 dominates and the comparison sort wins — exactly the crossover the paper
@@ -166,17 +193,17 @@ describes. Above it, radsort's flat throughput beats the comparison sort's
 
 | distribution        | radsort |    stdlib | note                      |
 |---------------------|--------:|----------:|---------------------------|
-| uniform random      |     994 |        65 | radsort 15×               |
-| **already sorted**  |     379 | **15062** | stdlib 40× (detects runs) |
-| **reverse sorted**  |     373 |  **9593** | stdlib 26×                |
-| few unique (16)     |    1055 |       427 | radsort 2.5×              |
-| small range (0–999) |     967 |       153 | radsort 6.3×              |
-| nearly sorted       |     937 |       470 | radsort 2×                |
+| uniform random      |     988 |        64 | radsort 15×               |
+| **already sorted**  |     296 | **14193** | stdlib 48× (detects runs) |
+| **reverse sorted**  |     290 |  **8969** | stdlib 31×                |
+| few unique (16)     |    1078 |       397 | radsort 2.7×              |
+| small range (0–999) |    1010 |       149 | radsort 6.8×              |
+| nearly sorted       |     915 |       466 | radsort 2×                |
 
 A radix sort does the same fixed number of passes regardless of the data, so
-radsort's throughput barely moves (~370–1050 MB/s, the low end being the
+radsort's throughput barely moves (~290–1080 MB/s, the low end being the
 cache-unfriendly strictly-sequential bucket pattern of pre-sorted input).
-pdqsort's throughput swings **230×** because it detects sorted/reverse runs. If
+pdqsort's throughput swings **220×** because it detects sorted/reverse runs. If
 your data is often already ordered, the comparison sort is unbeatable; for
 genuinely unordered data at scale, radsort wins decisively and *predictably*.
 
@@ -184,14 +211,14 @@ genuinely unordered data at scale, radsort wins decisively and *predictably*.
 
 The paper's actual claim is that Radsort beats a *plain out-of-place LSD radix
 sort* above ~2 MiB. On this machine that does **not** reproduce — a tuned plain
-LSD sort is faster at every size (~1.1–1.4 GB/s):
+LSD sort is faster at every size (~1.1–1.35 GB/s):
 
 |          n | radsort MB/s | plain LSD MB/s | radsort mem | plain LSD mem |
 |-----------:|-------------:|---------------:|------------:|--------------:|
-|    100 000 |          967 |           1354 |     1.06 MB |        0.4 MB |
-|  1 000 000 |         1202 |           1377 |     1.07 MB |          4 MB |
-| 10 000 000 |          984 |           1195 |     1.24 MB |         40 MB |
-| 30 000 000 |          860 |           1123 | **1.59 MB** |    **120 MB** |
+|    100 000 |          969 |           1324 |     1.06 MB |        0.4 MB |
+|  1 000 000 |         1255 |           1336 |     1.07 MB |          4 MB |
+| 10 000 000 |          994 |           1105 |     1.24 MB |         40 MB |
+| 30 000 000 |          875 |           1078 | **1.59 MB** |    **120 MB** |
 
 The paper's target machines (POWER9, Icelake/Grace servers) are memory-bandwidth
 starved, so plain LSD's read-for-ownership traffic dominates and Radsort's
@@ -237,21 +264,38 @@ amortized:
 
 |         n | fresh (alloc/call) |      recycled | speedup from recycling |
 |----------:|-------------------:|--------------:|-----------------------:|
-|     1 000 |   51 MB/s, 1.05 MB | 282 MB/s, 0 B |               **5.5×** |
-|    10 000 |           264 MB/s |      661 MB/s |                   2.5× |
-|   100 000 |           926 MB/s |      885 MB/s |                    ~1× |
-| 1 000 000 |          1150 MB/s |     1181 MB/s |                    ~1× |
+|     1 000 |   46 MB/s, 1.05 MB | 268 MB/s, 0 B |               **5.8×** |
+|    10 000 |           287 MB/s |      639 MB/s |                   2.2× |
+|   100 000 |          1005 MB/s |     1157 MB/s |                  ~1.2× |
+| 1 000 000 |          1262 MB/s |     1281 MB/s |                    ~1× |
 
 (`[]uint32`, uniform, monomorphised path.)
 
 ## Not implemented
 
-The scalar core is the paper's single-threaded `permuted` variant. Left out:
-bit-manipulation end-of-block checking (§4.2, "bitmanip", 5–50 % faster) and
-software write-combining. The concurrent sorts use a most-significant-byte split
-into independent buckets (the parallelisation the paper suggests in §5.2) rather
-than its §4.3 block-chunk scheme; the split path uses an O(n) buffer, so it does
-not preserve the O(√n) space bound.
+The core follows the paper's single-threaded `permuted` variant. Of the paper's
+optional optimizations, two are implemented and two are not.
+
+Implemented: **avoiding finalisation** (§4.1) — see `xxxSeq`, which `Map` also
+uses; and the portable half of **§4.2's "bitmanip"** end-of-block check — each
+bucket is a `{cur, end}` pointer pair instead of a slice + index, dropping a
+bounds check and shrinking the bucket table (~6–10 % faster on large
+`uint32`/`uint64` sorts here, gated behind the build tags above).
+
+Not implemented:
+
+- **The full §4.2 form** — a *single* cursor tested for block-alignment by
+  bitmask, which needs block-aligned storage (over-aligned scratch and handling
+  the input's unaligned head). It would trim the bucket table further for a few
+  percent more; the alignment machinery did not look worth it on this hardware.
+- **The §4.3 block-chunk parallel scheme.** The concurrent sorts instead use the
+  most-significant-byte split suggested at the end of §4.3, which needs an O(n)
+  buffer and so does not preserve the O(√n) space bound that §4.3's scheme keeps.
+
+Software write-combining is *not* a missing Radsort feature: the paper's `swc` is
+a separate baseline (a conventional out-of-place radix sort with streaming
+stores), and Radsort's block reuse keeps output blocks hot in cache, which the
+paper notes makes write-combining "not needed" (§6).
 
 ## License
 
