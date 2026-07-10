@@ -148,7 +148,7 @@ func TestParallelSortKeyCustom(t *testing.T) {
 // fallback threshold; the recycled variant shows the allocation saving.
 func BenchmarkParallel(b *testing.B) {
 	r := newRNG()
-	for _, n := range []int{10_000_000, 30_000_000} {
+	for _, n := range []int{1_000_000, 10_000_000, 30_000_000} {
 		data := genUint32(n, "uniform", r)
 		b.Run(fmt.Sprintf("serial/%d", n), func(b *testing.B) {
 			benchSort(b, data, Uint32s)
@@ -193,6 +193,130 @@ func BenchmarkConcurrentSerialSorts(b *testing.B) {
 					wg.Wait()
 				}
 			})
+		}
+	}
+}
+
+// BenchmarkParallelCrossover compares recycled serial against the forced §4.3
+// core across the serial/parallel threshold, to calibrate parallelMinLen.
+func BenchmarkParallelCrossover(b *testing.B) {
+	r := newRNG()
+	w := workerCount()
+	for _, n := range []int{1 << 16, 1 << 17, 1 << 18, 1 << 19, 1 << 20} {
+		data := genUint32(n, "uniform", r)
+		b.Run(fmt.Sprintf("serial/%d", n), func(b *testing.B) {
+			var s Sorter[uint32]
+			benchSort(b, data, func(x []uint32) { sortU32(&s, x) })
+		})
+		b.Run(fmt.Sprintf("parallel/%d", n), func(b *testing.B) {
+			var ps ParallelSorter[uint32]
+			benchSort(b, data, func(x []uint32) { forceParallelU32(&ps, x, w) })
+		})
+	}
+}
+
+// forceParallelU32 / forceParallelU64 / forceParallelKey run the Section 4.3 core
+// regardless of length or worker count, so tests can exercise its block machinery
+// at the small and boundary sizes the parallel fallback threshold never reaches.
+// The sorter is passed in so a sweep can reuse it (also exercising buffer reuse).
+
+func forceParallelU32(ps *ParallelSorter[uint32], x []uint32, w int) {
+	if len(x) < 2 {
+		return
+	}
+	ps.prepare(x, w)
+	for r := range 4 {
+		ps.distributeWork()
+		shift := uint(r) * rshift
+		ps.runThreads(func(t int) { sortStepThreadU32(ps, shift, t) })
+		ps.sortBlocks()
+	}
+	ps.compact()
+}
+
+func forceParallelU64(ps *ParallelSorter[uint64], x []uint64, w int) {
+	if len(x) < 2 {
+		return
+	}
+	ps.prepare(x, w)
+	for r := range 8 {
+		ps.distributeWork()
+		shift := uint(r) * rshift
+		ps.runThreads(func(t int) { sortStepThreadU64(ps, shift, t) })
+		ps.sortBlocks()
+	}
+	ps.compact()
+}
+
+func forceParallelKey[E any](ps *ParallelSorter[E], x []E, w, rounds int, keyOf func(E) uint64) {
+	if len(x) < 2 {
+		return
+	}
+	ps.prepare(x, w)
+	for r := range rounds {
+		ps.distributeWork()
+		shift := uint(r * rshift)
+		ps.runThreads(func(t int) { sortStepThread(ps, shift, keyOf, t) })
+		ps.sortBlocks()
+	}
+	ps.compact()
+}
+
+func TestParallelForce(t *testing.T) {
+	r := newRNG()
+	var ps ParallelSorter[uint32]
+
+	for n := 0; n <= 4*blockSize+radix; n++ { // exhaustive small sizes, w=3
+		x := make([]uint32, n)
+		for i := range x {
+			x[i] = r.Uint32() % 300 // heavy collisions, many partial blocks
+		}
+		want := slices.Clone(x)
+		slices.Sort(want)
+		forceParallelU32(&ps, x, 3)
+		if !slices.Equal(x, want) {
+			t.Fatalf("exhaustive n=%d: not sorted", n)
+		}
+	}
+
+	for _, w := range []int{2, 4, 8, 16} {
+		for _, n := range []int{2, 100, blockSize, blockSize + 1, 2*blockSize + 3, 5000, blockSize * w, blockSize*w*4 + 11, 50_000} {
+			x := make([]uint32, n)
+			for i := range x {
+				x[i] = r.Uint32()
+			}
+			want := slices.Clone(x)
+			slices.Sort(want)
+			forceParallelU32(&ps, x, w)
+			if !slices.Equal(x, want) {
+				t.Fatalf("w=%d n=%d: not sorted", w, n)
+			}
+		}
+	}
+}
+
+// TestParallelForceStable checks the Section 4.3 merge preserves stability
+// (equal keys keep input order) across worker counts and boundary sizes.
+func TestParallelForceStable(t *testing.T) {
+	r := newRNG()
+	type pair struct {
+		key uint32
+		seq int
+	}
+	byKey := func(p pair) uint64 { return uint64(p.key) }
+	var ps ParallelSorter[pair]
+	for _, w := range []int{2, 3, 8} {
+		for _, n := range []int{5000, blockSize*w + 7, 50_000} {
+			px := make([]pair, n)
+			for i := range px {
+				px[i] = pair{key: r.Uint32() % 200, seq: i} // heavy collisions
+			}
+			want := slices.Clone(px)
+			slices.SortStableFunc(want, func(a, b pair) int { return cmp.Compare(a.key, b.key) })
+			forceParallelKey(&ps, px, w, 4, byKey)
+			if !slices.Equal(px, want) {
+				t.Fatalf("w=%d n=%d: parallel result != stable sort", w, n)
+			}
 		}
 	}
 }

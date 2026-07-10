@@ -1,6 +1,9 @@
 package radsort
 
-import "math"
+import (
+	"math"
+	"math/bits"
+)
 
 // Order-preserving mappings to unsigned keys. Signed integers only need their
 // sign bit flipped; IEEE-754 floats need the sign bit flipped for positives and
@@ -45,6 +48,12 @@ func Int32s(x []int32) { SortKey(x, 4, int32Key) }
 // Int64s sorts a slice of int64 in ascending order.
 func Int64s(x []int64) { SortKey(x, 8, int64Key) }
 
+// Uints sorts a slice of uint (word-sized) in ascending order.
+func Uints(x []uint) { SortKey(x, wordRounds, uintKey) }
+
+// Ints sorts a slice of int (word-sized) in ascending order.
+func Ints(x []int) { SortKey(x, wordRounds, intKey) }
+
 // Float64s sorts a slice of float64 in ascending order (NaNs last).
 func Float64s(x []float64) { SortKey(x, 8, float64Key) }
 
@@ -54,6 +63,12 @@ func Float32s(x []float32) { SortKey(x, 4, float32Key) }
 // Key mappings, shared with the Section 4.1 iterators (seq.go) used by Map.
 func int32Key(v int32) uint64 { return uint64(uint32(v) ^ 1<<31) }
 func int64Key(v int64) uint64 { return uint64(v) ^ 1<<63 }
+
+// wordRounds is the byte width of a machine word (uint/int): 4 or 8.
+const wordRounds = bits.UintSize / 8
+
+func uintKey(v uint) uint64 { return uint64(v) }
+func intKey(v int) uint64   { return uint64(uint(v)) ^ 1<<(bits.UintSize-1) }
 
 func float32Key(v float32) uint64 {
 	b := math.Float32bits(v)
